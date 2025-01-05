@@ -58,7 +58,7 @@ function calc(data: BlockState,ctx:Context): BlockState {
 
     const ret = search(board_state, items, type_left, 0,ctx)
     return {
-        items: ret.toArray(),
+        items: ret?.toArray() || [],
     }
 }
 
