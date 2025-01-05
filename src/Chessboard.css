@@ -1,0 +1,41 @@
+/* Chessboard.css */
+.chessboard-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    gap: 1px; /* Uniform gap between squares */
+    background-color: #999; /* Ensures gaps are black */
+    width: 804px; /* 400px for squares + 8 gaps of 1px */
+    height: 804px; /* 400px for squares + 8 gaps of 1px */
+    box-sizing: border-box; /* Ensure padding and borders are included in size */
+}
+
+.chessboard-square {
+    background-color: #b0b0b0; /* Gray background for squares */
+    width: 100%; /* Auto-adjust to container */
+    height: 100%; /* Auto-adjust to container */
+    display: flex; /* Enable flexbox */
+    align-items: center; /* Center vertically */
+    justify-content: center; /* Center horizontally */
+}
+
+.chessboard-square-selected {
+    transition: box-shadow 0.3s ease, transform 0.3s ease; /* Smooth transition */
+    box-shadow: 0 0 15px 5px rgba(0, 123, 255, 0.8); /* Blue glow */
+    transform: scale(1.05); /* Slightly enlarge for effect */
+}
+
+
+.circle {
+    width: 80%; /* Adjust size of the circle */
+    height: 80%;
+    background-color: #8a8a8a; /* Deep gray color */
+    border-radius: 50%;
+    box-shadow: 3px 3px 5px rgba(0, 0, 0, 0.3), -3px -3px 5px rgba(255, 255, 255, 0.2);
+}
+
+.block-selected {
+    transition: box-shadow 0.3s ease, transform 0.3s ease; /* Smooth transition */
+    box-shadow: 0 0 15px 5px rgba(0, 123, 255, 0.8); /* Blue glow */
+    transform: scale(1.05); /* Slightly enlarge for effect */
+}
