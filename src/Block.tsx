@@ -16,7 +16,7 @@ interface BlockProps {
     onMouseOut?: () => void
 }
 
-export const baseSize = 40
+export const baseSize = 60
 export const space = 3
 
 

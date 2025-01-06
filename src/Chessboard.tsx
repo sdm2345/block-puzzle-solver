@@ -65,7 +65,7 @@ export function Chessboard({squares, onClick, onMouseOut, onMouseOver}: Chessboa
             })}
 
             <div style={{position: 'absolute'}}>
-                {JSON.stringify(put_block_list.toArray())}
+
             </div>
 
         </>
