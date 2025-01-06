@@ -9,6 +9,7 @@ export default defineConfig({
       exclude: /\.worker\.(ts|js)$|worker\.ts$/,
     }),
   ],
+  base: './',  // 设置相对路径
   worker: {
     format: 'es', // 确保 Worker 使用 ES 模块
   },
@@ -16,6 +17,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         format: 'es', // 强制模块格式为 ES 模块
+        dir:'docs'
       },
     },
   },
