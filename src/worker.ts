@@ -9,137 +9,218 @@ import {
     defaultBlocks,
     PositionIndex,
     RowCol,
+    TypeId
 } from "./types.ts";
 
-type BoardType = string[];
-
-interface Context {
-    count: number;
-}
-
 self.onmessage = (event) => {
-    const {taskId, data} = event.data;
-    const ctx: Context = {count: 0};
+    console.log('Received message');
+    const { taskId, data } = event.data;
+
+    const ctx = {
+        count: 0,
+    };
+
     const req = data as BlockState;
 
-    req.items.forEach(v => v.item.dir = v.item.dir || 'row');
-
-    const items = req.items;
-    const board_state = createBoardState(items);
-
-    const usedBlocksSet = new Set(items.map(v => v.item.type));
-    const leftBlocks = defaultBlocks.filter(block => !usedBlocksSet.has(block));
-
-    // 预先计算块属性
-    const blockInfoMap = new Map<BlockType, BlockSizeColor>();
-    defaultBlocks.forEach(block => blockInfoMap.set(block, parseBlockType(block)));
-
-    const sortedLeftBlocks = leftBlocks.slice().sort((a, b) => {
-        const aInfo = blockInfoMap.get(a)!;
-        const bInfo = blockInfoMap.get(b)!;
-        return (bInfo.height * bInfo.width) - (aInfo.height * aInfo.width);
+    // 设置默认方向
+    req.items = req.items.map((v) => {
+        v.item.dir = v.item.dir || 'row';
+        return v;
     });
 
-    const result = search(board_state, items, sortedLeftBlocks, blockInfoMap, ctx);
-    self.postMessage({taskId, action: 'done', data: result});
+    console.log('Request:', req);
+
+    try {
+        const result = calc(req, ctx);
+        self.postMessage({ taskId, action: 'done', data: result });
+    } catch (error) {
+        self.postMessage({ taskId, action: 'error', message: error.message });
+    }
 };
 
-function createBoardState(data: BlockItem[]): BoardType {
-    const board: BoardType = new Array(64).fill('');
-    data.forEach(v => {
-        const {row, col} = getIndexRowCol(v.index);
-        const info = parseBlockType(v.item.type);
-        const dir = v.item.dir || 'row';
-        const [width, height] = dir === 'row' ? [info.width, info.height] : [info.height, info.width];
-        for (let r = row; r < row + height; r++) {
-            for (let c = col; c < col + width; c++) {
-                const index = r * 8 + c;
-                board[index] = v.item.type;
-            }
-        }
+function calc(data: BlockState, ctx: { count: number }): BlockState {
+    console.log('Starting calculation', data);
+
+    const all = new Set(defaultBlocks);
+    const type_list = data.items.map((v) => v.item.type);
+    const type_left = new Set([...all].filter(x => !type_list.includes(x)));
+
+    const board = createBoard(data.items);
+    console.log('Initial board:', debugBoard(board));
+
+    const sortedBlocks = Array.from(type_left).sort((a, b) => {
+        const sizeA = parseBlockType(a).width * parseBlockType(a).height;
+        const sizeB = parseBlockType(b).width * parseBlockType(b).height;
+        return sizeB - sizeA; // 从大到小排序
     });
+
+    const ret = search(board, data.items, sortedBlocks, ctx);
+    if (ret) {
+        return { items: ret };
+    } else {
+        throw new Error('No solution found');
+    }
+}
+
+function createBoard(data: BlockItem[]): string[] {
+    const board: string[] = Array(64).fill('');
+    for (const v of data) {
+        if (v.index >= 64) {
+            throw new Error(`Index (${v.index}) is out of bounds`);
+        }
+        const range = typeToRange(v);
+        if (!canPlace(board, range)) {
+            throw new Error(`Cannot place block at index ${v.index}`);
+        }
+        placeBlock(board, range, v.item.type);
+    }
     return board;
 }
 
-function search(
-    board: BoardType,
-    placed: BlockItem[],
-    left: BlockType[],
-    blockInfoMap: Map<BlockType, BlockSizeColor>,
-    ctx: Context
-): BlockState | undefined {
-    if (left.length === 0) {
-        return {items: placed};
-    }
-
-    // 找到第一个空位置
-    let firstEmptyIndex = -1;
-    for (let i = 0; i < 64; i++) {
-        if (board[i] === '') {
-            firstEmptyIndex = i;
-            break;
-        }
-    }
-
-    if (firstEmptyIndex === -1) return undefined;
-
-    const {row, col} = getIndexRowCol(firstEmptyIndex);
-
-    for (let i = 0; i < left.length; i++) {
-        const blockType = left[i];
-        const info = blockInfoMap.get(blockType)!;
-        const directions = ['row', 'col'];
-        for (const dir of directions) {
-            const [width, height] = dir === 'row' ? [info.width, info.height] : [info.height, info.width];
-            if (row + height > 8 || col + width > 8) continue;
-
-            let canPlace = true;
-            for (let r = row; r < row + height; r++) {
-                for (let c = col; c < col + width; c++) {
-                    const index = r * 8 + c;
-                    if (board[index] !== '') {
-                        canPlace = false;
-                        break;
-                    }
-                }
-                if (!canPlace) break;
-            }
-
-            if (canPlace) {
-                ctx.count++;
-                self.postMessage({action: "count", count: ctx.count});
-
-                const newPlaced = [...placed];
-                const newBoard = [...board];
-                newPlaced.push({item: {type: blockType, dir: dir as BlockDirType}, index: firstEmptyIndex});
-                for (let r = row; r < row + height; r++) {
-                    for (let c = col; c < col + width; c++) {
-                        const index = r * 8 + c;
-                        newBoard[index] = blockType;
-                    }
-                }
-
-                const newLeft = [...left];
-                newLeft.splice(i, 1);
-                const result = search(newBoard, newPlaced, newLeft, blockInfoMap, ctx);
-                if (result) return result;
-            }
-        }
-    }
-
-    return undefined;
+interface Range {
+    row: number;
+    col: number;
+    width: number;
+    height: number;
 }
 
-function getIndexRowCol(pos: PositionIndex): RowCol {
-    return {row: Math.floor(pos / 8), col: pos % 8};
+function placeBlock(board: string[], range: Range, block: BlockType) {
+    for (let row = range.row; row < range.row + range.height; row++) {
+        for (let col = range.col; col < range.col + range.width; col++) {
+            const index = (row << 3) + col;
+            if (index >= 64) {
+                throw new Error(`Block placement out of bounds at index ${index}`);
+            }
+            board[index] = block;
+        }
+    }
+}
+
+function canPlace(board: string[], range: Range): boolean {
+    if (range.row + range.height > 8 || range.col + range.width > 8) {
+        return false;
+    }
+    for (let row = range.row; row < range.row + range.height; row++) {
+        for (let col = range.col; col < range.col + range.width; col++) {
+            const index = (row << 3) + col;
+            if (index >= 64 || board[index] !== '') {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function typeToRange(v: BlockItem): Range {
+    const info = parseBlockType(v.item.type);
+    const dir = v.item.dir || 'row';
+    const [width, height] = dir === 'row' ? [info.width, info.height] : [info.height, info.width];
+    const pos = getIndexRowCol(v.index);
+    return {
+        width,
+        height,
+        row: pos.row,
+        col: pos.col,
+    };
+}
+
+function search(board: string[], placed: BlockItem[], left: string[], ctx: { count: number }): BlockItem[] | null {
+    if (left.length === 0) {
+        console.log('Solution found:', placed);
+        return placed;
+    }
+
+    // 选择下一个块，优先选择面积最大的块
+    const current = left[0];
+    const remaining = left.slice(1);
+
+    // 遍历棋盘，寻找第一个空位
+    const firstEmpty = board.indexOf('');
+    if (firstEmpty === -1) {
+        return null;
+    }
+    const pos = getIndexRowCol(firstEmpty);
+
+    const directions: BlockDirType[] = ['row', 'col'];
+    for (const dir of directions) {
+        const newBlock: BlockItem = {
+            item: {
+                type: current,
+                dir: dir,
+            },
+            index: firstEmpty,
+        };
+        const range = typeToRange(newBlock);
+        if (canPlace(board, range)) {
+            // 放置块
+            placeBlock(board, range, current);
+            ctx.count++;
+            self.postMessage({ action: "count", count: ctx.count });
+
+            // 前向检查：确保剩余空间足够
+            if (isValid(board, remaining)) {
+                const result = search(board, placed.concat(newBlock), remaining, ctx);
+                if (result) {
+                    return result;
+                }
+            }
+
+            // 回溯
+            removeBlock(board, range);
+        }
+    }
+
+    return null;
+}
+
+function removeBlock(board: string[], range: Range) {
+    for (let row = range.row; row < range.row + range.height; row++) {
+        for (let col = range.col; col < range.col + range.width; col++) {
+            const index = (row << 3) + col;
+            board[index] = '';
+        }
+    }
+}
+
+function isValid(board: string[], left: string[]): boolean {
+    // 简单检查剩余空格是否足够放置剩余的块
+    const emptyCount = board.filter(cell => cell === '').length;
+    const required = left.reduce((sum, type) => {
+        const info = parseBlockType(type);
+        return sum + Math.max(info.width, info.height);
+    }, 0);
+    return emptyCount >= required;
+}
+
+function debugBoard(board: string[]): string {
+    let out = '';
+    for (let i = 0; i < board.length; i++) {
+        if (i % 8 === 0 && i !== 0) {
+            out += '\n';
+        }
+        out += (board[i] ? TypeId[board[i]] : '.') + ' ';
+    }
+    return out;
 }
 
 const cache: Record<string, BlockSizeColor> = {};
 
 function parseBlockType(s: string): BlockSizeColor {
-    if (cache[s]) return cache[s];
-    const [size, color, dir] = s.split(':');
-    const [height, width] = size.split('x').map(v => parseInt(v));
-    cache[s] = {width, height, color, dir: dir as BlockDirType};
+    if (cache[s]) {
+        return cache[s];
+    }
+    const [size, color] = s.split(':');
+    const [width, height] = size.split('x').map(Number);
+    const dir: BlockDirType = 'row'; // 默认方向
+    cache[s] = { width, height, color, dir };
     return cache[s];
 }
+
+function getIndexRowCol(pos: PositionIndex): RowCol {
+    return {
+        row: pos >> 3,
+        col: pos % 8,
+    };
+}
+
+console.log('Worker loaded successfully');
