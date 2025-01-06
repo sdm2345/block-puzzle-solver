@@ -94,7 +94,7 @@ function App() {
     const [pos, setPos] = useState<Position>({top: 0, left: 0})
     const [realPos, setRealPos] = useState<Position>({top: 0, left: 0})
     const [canPut, setCanPut] = useState(false)
-    const [canPutReason, setCanPutReason] = useState('')
+    //const [canPutReason, setCanPutReason] = useState('')
     const [boardState, setBoardState] = useRecoilState(ChessboardState)
     const [select, set_select] = useRecoilState(SELELECT_ID)
     const [put_block, set_put_block] = useRecoilState(BLOCK_PUT_LIST)
@@ -108,7 +108,7 @@ function App() {
             top: current_row * baseSize,
         })
         if (select) {
-            setCanPutReason('')
+
             const info = parseBlockType(select)
 
             const dir = blockDir.get(select) || 'row'
@@ -119,7 +119,7 @@ function App() {
                 for (let col = current_col; col < w + current_col; col++) {
                     if (boardState.get(row * 8 + col)) {
                         setCanPut(false)
-                        setCanPutReason(JSON.stringify([
+                        console.log(JSON.stringify([
                             'row * 8 + col' + boardState.get(row * 8 + col),
                             {row, col},
                             {'row * 8 + col': row * 8 + col}
@@ -130,7 +130,7 @@ function App() {
                     if (row > 7 || col > 7) {
                         // console.log('row > 7 || col > 7', row > 7, '||', col > 7, row, col)
                         setCanPut(false)
-                        setCanPutReason(JSON.stringify(['row > 7 || col > 7', row > 7, '||', col > 7, row, col]))
+                        console.log(JSON.stringify(['row > 7 || col > 7', row > 7, '||', col > 7, row, col]))
                         return
                     }
                 }
