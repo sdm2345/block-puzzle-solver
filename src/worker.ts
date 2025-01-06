@@ -9,137 +9,185 @@ import {
     defaultBlocks,
     PositionIndex,
     RowCol,
+    TypeId
 } from "./types.ts";
 
-type BoardType = string[];
+type BoardType = string[]; // using native array for board representation
 
 interface Context {
-    count: number;
+    count: number
 }
 
 self.onmessage = (event) => {
-    const {taskId, data} = event.data;
-    const ctx: Context = {count: 0};
+    const { taskId, data } = event.data;
+    const ctx: Context = {
+        count: 0,
+    }
+
     const req = data as BlockState;
 
-    req.items.forEach(v => v.item.dir = v.item.dir || 'row');
-
-    const items = req.items;
-    const board_state = createBoardState(items);
-
-    const usedBlocksSet = new Set(items.map(v => v.item.type));
-    const leftBlocks = defaultBlocks.filter(block => !usedBlocksSet.has(block));
-
-    // 预先计算块属性
-    const blockInfoMap = new Map<BlockType, BlockSizeColor>();
-    defaultBlocks.forEach(block => blockInfoMap.set(block, parseBlockType(block)));
-
-    const sortedLeftBlocks = leftBlocks.slice().sort((a, b) => {
-        const aInfo = blockInfoMap.get(a)!;
-        const bInfo = blockInfoMap.get(b)!;
-        return (bInfo.height * bInfo.width) - (aInfo.height * aInfo.width);
+    req.items = req.items.map((v) => {
+        v.item.dir = v.item.dir || 'row';
+        return v;
     });
 
-    const result = search(board_state, items, sortedLeftBlocks, blockInfoMap, ctx);
-    self.postMessage({taskId, action: 'done', data: result});
+    // Calculate the result
+    const result = calc(req, ctx);
+    self.postMessage({ taskId, action: 'done', data: result });
 };
 
-function createBoardState(data: BlockItem[]): BoardType {
-    const board: BoardType = new Array(64).fill('');
-    data.forEach(v => {
-        const {row, col} = getIndexRowCol(v.index);
-        const info = parseBlockType(v.item.type);
-        const dir = v.item.dir || 'row';
-        const [width, height] = dir === 'row' ? [info.width, info.height] : [info.height, info.width];
-        for (let r = row; r < row + height; r++) {
-            for (let c = col; c < col + width; c++) {
-                const index = r * 8 + c;
-                board[index] = v.item.type;
-            }
-        }
-    });
-    return board;
+function calc(data: BlockState, ctx: Context): BlockState {
+    const all = new Set<BlockType>(defaultBlocks);
+    const type_list = data.items.map((v) => v.item.type);
+    const type_left_set = new Set([...all].filter(x => !type_list.includes(x)));
+
+    // Sort remaining blocks by size (larger blocks first)
+    const sorted_left_items = Array.from(type_left_set).sort((a, b) => getBlockSize(b) - getBlockSize(a));
+
+    const items = data.items;
+    const board_state = create_board_state(items);
+
+    const ret = search(board_state, items, sorted_left_items, 0, ctx);
+    return {
+        items: ret || [],
+    }
 }
 
-function search(
-    board: BoardType,
-    placed: BlockItem[],
-    left: BlockType[],
-    blockInfoMap: Map<BlockType, BlockSizeColor>,
-    ctx: Context
-): BlockState | undefined {
-    if (left.length === 0) {
-        return {items: placed};
-    }
+function create_board_state(data: BlockItem[]): BoardType {
+    const board_state = new Array(64).fill('');
+    return fill_board_state(board_state, data);
+}
 
-    // 找到第一个空位置
-    let firstEmptyIndex = -1;
-    for (let i = 0; i < 64; i++) {
-        if (board[i] === '') {
-            firstEmptyIndex = i;
-            break;
+function fill_board_state(board_state: BoardType, data: BlockItem[]): BoardType {
+    for (let i = 0; i < data.length; i++) {
+        const v = data[i];
+        if (v) {
+            if (v.index >= 64) {
+                throw new Error(`index(${v.index}) is error, too large`);
+            }
+            const range = type_to_range(v);
+            if (!can_place_here(board_state, range)) {
+                throw new Error(`Cannot place block ${v.item.type} at index ${v.index}`);
+            }
+            put_block_here(board_state, range, v.item.type);
         }
     }
+    return board_state;
+}
 
-    if (firstEmptyIndex === -1) return undefined;
+interface Range {
+    row: number
+    col: number
+    width: number
+    height: number
+}
 
-    const {row, col} = getIndexRowCol(firstEmptyIndex);
+function put_block_here(board_state: BoardType, range: Range, block: BlockType) {
+    for (let row = range.row; row < range.row + range.height; row++) {
+        for (let col = range.col; col < range.col + range.width; col++) {
+            const index = (row << 3) + col;
+            board_state[index] = block;
+        }
+    }
+}
 
-    for (let i = 0; i < left.length; i++) {
-        const blockType = left[i];
-        const info = blockInfoMap.get(blockType)!;
-        const directions = ['row', 'col'];
-        for (const dir of directions) {
-            const [width, height] = dir === 'row' ? [info.width, info.height] : [info.height, info.width];
-            if (row + height > 8 || col + width > 8) continue;
-
-            let canPlace = true;
-            for (let r = row; r < row + height; r++) {
-                for (let c = col; c < col + width; c++) {
-                    const index = r * 8 + c;
-                    if (board[index] !== '') {
-                        canPlace = false;
-                        break;
-                    }
-                }
-                if (!canPlace) break;
+function can_place_here(board_state: BoardType, range: Range): boolean {
+    if (range.row + range.height > 8 || range.col + range.width > 8) {
+        return false;
+    }
+    for (let row = range.row; row < range.row + range.height; row++) {
+        for (let col = range.col; col < range.col + range.width; col++) {
+            const index = (row << 3) + col;
+            if (board_state[index]) {
+                return false;
             }
+        }
+    }
+    return true;
+}
 
-            if (canPlace) {
+function type_to_range(v: BlockItem): Range {
+    const info = parseBlockType(v.item.type);
+    const dir = v.item.dir || 'row';
+    const width = dir == 'row' ? info.width : info.height;
+    const height = dir == 'row' ? info.height : info.width;
+    const pos = getIndexRowCol(v.index);
+    return { width, height, row: pos.row, col: pos.col };
+}
+
+function getPossibleDirections(blockType: BlockType): BlockDirType[] {
+    const info = parseBlockType(blockType);
+    if (info.width === info.height) {
+        return ['row']; // Square blocks need only one orientation
+    }
+    return ['row', 'col'];
+}
+
+function getBlockSize(blockType: BlockType): number {
+    const info = parseBlockType(blockType);
+    return info.width * info.height;
+}
+
+function search(board_state: BoardType, data: BlockItem[], left_items: BlockType[], depth: number, ctx: Context): (BlockItem[] | undefined) {
+    if (left_items.length === 0) {
+        return data;
+    }
+
+    for (let index = 0; index < 64; index++) {
+        if (board_state[index]) {
+            continue;
+        }
+
+        const position = getIndexRowCol(index);
+        for (let i = 0; i < left_items.length; i++) {
+            const current = left_items[i];
+
+            for (let dir_item of getPossibleDirections(current)) {
+                const new_block_item: BlockItem = {
+                    item: { type: current, dir: dir_item },
+                    index: index,
+                };
+
+                const range = type_to_range(new_block_item);
+                if (!can_place_here(board_state, range)) {
+                    continue;
+                }
+
+                // Prepare new state
+                const new_board_state = board_state.slice();
+                const new_data = data.slice();
+                const new_left_items = left_items.slice();
+                new_left_items.splice(i, 1); // remove current block
+
+                put_block_here(new_board_state, range, current);
+                new_data.push(new_block_item);
+
                 ctx.count++;
-                self.postMessage({action: "count", count: ctx.count});
-
-                const newPlaced = [...placed];
-                const newBoard = [...board];
-                newPlaced.push({item: {type: blockType, dir: dir as BlockDirType}, index: firstEmptyIndex});
-                for (let r = row; r < row + height; r++) {
-                    for (let c = col; c < col + width; c++) {
-                        const index = r * 8 + c;
-                        newBoard[index] = blockType;
-                    }
+                if (ctx.count % 1000 === 0) { // Adjust the frequency as needed
+                    self.postMessage({ action: "count", count: ctx.count });
                 }
 
-                const newLeft = [...left];
-                newLeft.splice(i, 1);
-                const result = search(newBoard, newPlaced, newLeft, blockInfoMap, ctx);
-                if (result) return result;
+                const ret = search(new_board_state, new_data, new_left_items, depth + 1, ctx);
+                if (ret && ret.length > 0) {
+                    return ret;
+                }
             }
         }
     }
-
     return undefined;
 }
 
-function getIndexRowCol(pos: PositionIndex): RowCol {
-    return {row: Math.floor(pos / 8), col: pos % 8};
-}
-
-const cache: Record<string, BlockSizeColor> = {};
-
 function parseBlockType(s: string): BlockSizeColor {
-    if (cache[s]) return cache[s];
-    const [size, color, dir] = s.split(':');
-    const [height, width] = size.split('x').map(v => parseInt(v));
-    cache[s] = {width, height, color, dir: dir as BlockDirType};
-    return cache[s];
+    const [size, color] = s.split(':');
+    const [width, height] = size.split('x').map((v) => parseInt(v));
+    return { width, height, color, dir: 'row' };
 }
+
+function getIndexRowCol(pos: PositionIndex): RowCol {
+    return {
+        row: pos >> 3,
+        col: pos % 8,
+    }
+}
+
+console.log('Worker loaded and ready.');
